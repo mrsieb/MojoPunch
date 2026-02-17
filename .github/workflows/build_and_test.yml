@@ -137,7 +137,8 @@ jobs:
       - name: Import Certificates (macOS)
         uses: sudara/basic-macos-keychain-action@v1
         id: keychain
-        if: ${{ runner.os == 'macOS' && secrets.DEV_ID_APP_CERT != '' }}
+        if: ${{ runner.os == 'macOS' }}
+        continue-on-error: true
         with:
           dev-id-app-cert: ${{ secrets.DEV_ID_APP_CERT }}
           dev-id-app-password: ${{ secrets.DEV_ID_APP_PASSWORD }}
@@ -198,7 +199,8 @@ jobs:
           mv "packaging/Output/${{ env.ARTIFACT_NAME }}.exe" "${{ env.ARTIFACTS_PATH }}/"
 
       - name: Codesign with Azure Trusted Signing
-        if: ${{ runner.os == 'Windows' && secrets.AZURE_ENDPOINT != '' }}
+        if: ${{ runner.os == 'Windows' }}
+        continue-on-error: true
         uses: azure/trusted-signing-action@v0.5.11
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
