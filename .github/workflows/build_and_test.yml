@@ -137,7 +137,7 @@ jobs:
       - name: Import Certificates (macOS)
         uses: sudara/basic-macos-keychain-action@v1
         id: keychain
-        if: ${{ runner.os == 'macOS' }}
+        if: ${{ runner.os == 'macOS' && secrets.DEV_ID_APP_CERT != '' }}
         with:
           dev-id-app-cert: ${{ secrets.DEV_ID_APP_CERT }}
           dev-id-app-password: ${{ secrets.DEV_ID_APP_PASSWORD }}
@@ -145,14 +145,14 @@ jobs:
           dev-id-installer-password: ${{ secrets.DEV_ID_INSTALLER_PASSWORD }}
 
       - name: Codesign (macOS)
-        if: ${{ runner.os == 'macOS' }}
+        if: ${{ runner.os == 'macOS' && steps.keychain.outcome == 'success' }}
         timeout-minutes: 5
         run: |
           codesign --force --keychain ${{ steps.keychain.outputs.keychain-path }} -s "${{ secrets.DEVELOPER_ID_APPLICATION }}" -v "${{ env.VST3_PATH }}" --deep --strict --options=runtime --timestamp
           codesign --force --keychain ${{ steps.keychain.outputs.keychain-path }} -s "${{ secrets.DEVELOPER_ID_APPLICATION }}" -v "${{ env.CLAP_PATH }}" --deep --strict --options=runtime --timestamp
 
       - name: Add Custom Icons (macOS)
-        if: ${{ runner.os == 'macOS' }}
+        if: ${{ runner.os == 'macOS' && steps.keychain.outcome == 'success' }}
         run: |
           sips -i packaging/pamplejuce.icns
 
@@ -165,7 +165,7 @@ jobs:
           SetFile -a C "${{ env.CLAP_PATH }}"
 
       - name: pkgbuild, Productbuild and Notarize (macOS)
-        if: ${{ runner.os == 'macOS' }}
+        if: ${{ runner.os == 'macOS' && steps.keychain.outcome == 'success' }}
         timeout-minutes: 10
         run: |
           pkgbuild --identifier "${{ env.BUNDLE_ID }}.vst3.pkg" --version $VERSION --component "${{ env.VST3_PATH }}" --install-location "/Library/Audio/Plug-Ins/VST3" "packaging/${{ env.PRODUCT_NAME }}.vst3.pkg"
@@ -198,7 +198,7 @@ jobs:
           mv "packaging/Output/${{ env.ARTIFACT_NAME }}.exe" "${{ env.ARTIFACTS_PATH }}/"
 
       - name: Codesign with Azure Trusted Signing
-        if: ${{ runner.os == 'Windows' }}
+        if: ${{ runner.os == 'Windows' && secrets.AZURE_ENDPOINT != '' }}
         uses: azure/trusted-signing-action@v0.5.11
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -229,7 +229,7 @@ jobs:
           path: "${{ env.ARTIFACTS_PATH }}/${{ env.ARTIFACT_NAME }}.zip"
 
       - name: Upload pkg (macOS)
-        if: ${{ runner.os == 'macOS' }}
+        if: ${{ runner.os == 'macOS' && steps.keychain.outcome == 'success' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ env.ARTIFACT_NAME }}.pkg
