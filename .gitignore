@@ -28,3 +28,9 @@ cmake-build-debug
 cmake-build-release
 cmake-build-relwithdebinfo
 packaging/Output/*
+
+# Build directory
+build/
+
+# MinGW toolchain (not needed for GitHub Actions)
+toolchain-mingw64.cmake
