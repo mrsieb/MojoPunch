@@ -137,8 +137,7 @@ jobs:
       - name: Import Certificates (macOS)
         uses: sudara/basic-macos-keychain-action@v1
         id: keychain
-        if: ${{ runner.os == 'macOS' }}
-        continue-on-error: true
+        if: false  # Disabled - requires secrets
         with:
           dev-id-app-cert: ${{ secrets.DEV_ID_APP_CERT }}
           dev-id-app-password: ${{ secrets.DEV_ID_APP_PASSWORD }}
@@ -199,8 +198,7 @@ jobs:
           mv "packaging/Output/${{ env.ARTIFACT_NAME }}.exe" "${{ env.ARTIFACTS_PATH }}/"
 
       - name: Codesign with Azure Trusted Signing
-        if: ${{ runner.os == 'Windows' }}
-        continue-on-error: true
+        if: false  # Disabled - requires secrets
         uses: azure/trusted-signing-action@v0.5.11
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -230,12 +228,12 @@ jobs:
           name: ${{ env.ARTIFACT_NAME }}.zip
           path: "${{ env.ARTIFACTS_PATH }}/${{ env.ARTIFACT_NAME }}.zip"
 
-      - name: Upload pkg (macOS)
-        if: ${{ runner.os == 'macOS' && steps.keychain.outcome == 'success' }}
+      - name: Upload Plugins (macOS)
+        if: ${{ runner.os == 'macOS' }}
         uses: actions/upload-artifact@v6
         with:
-          name: ${{ env.ARTIFACT_NAME }}.pkg
-          path: packaging/${{ env.ARTIFACT_NAME }}.pkg
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ARTIFACTS_PATH }}
 
   release:
     if: contains(github.ref, 'tags/v')
