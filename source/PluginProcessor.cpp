@@ -161,6 +161,21 @@ void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
 
+    // Pre-initialise every filter to a 2nd-order bypass BEFORE prepare().
+    // The default Filter() constructor creates a 1st-order filter.  If we
+    // called prepare() first, check() would see order mismatch and call
+    // reset() (heap allocation) on the audio thread when coefficients are
+    // later updated.  By assigning a 6-element array now, assignImpl<6>
+    // pre-allocates storage for order=2 and prepare() sets up the correct
+    // delay-state size.
+    const std::array<float, 6> bypass2nd {{ 1.f, 0.f, 0.f, 1.f, 0.f, 0.f }};
+    *leftChain.get<LowShelf>().coefficients   = bypass2nd;
+    *leftChain.get<PeakBell>().coefficients   = bypass2nd;
+    *leftChain.get<HighShelf>().coefficients  = bypass2nd;
+    *rightChain.get<LowShelf>().coefficients  = bypass2nd;
+    *rightChain.get<PeakBell>().coefficients  = bypass2nd;
+    *rightChain.get<HighShelf>().coefficients = bypass2nd;
+
     juce::dsp::ProcessSpec spec;
     spec.sampleRate       = sampleRate;
     spec.maximumBlockSize = static_cast<juce::uint32> (samplesPerBlock);
@@ -206,23 +221,14 @@ PluginProcessor::FilterParams PluginProcessor::readParams() const noexcept
              rawHighFreq->load(), rawHighGain->load(), rawHighQ->load() };
 }
 
-void PluginProcessor::writeCoeffsInPlace (juce::dsp::IIR::Coefficients<float>& c,
-                                           float b0, float b1, float b2,
-                                           float a0, float a1, float a2) noexcept
-{
-    const float inv = 1.0f / a0;
-    auto* raw = c.coefficients.getRawDataPointer();
-    raw[0] = b0 * inv;
-    raw[1] = b1 * inv;
-    raw[2] = b2 * inv;
-    raw[3] = a1 * inv;
-    raw[4] = a2 * inv;
-}
-
 void PluginProcessor::updateFilters (const FilterParams& p)
 {
     using namespace juce;
     const float sr = static_cast<float> (currentSampleRate);
+
+    // Assign via std::array<float,6> — goes through assignImpl<6> which
+    // normalises by a0, stores 5 values, and is heap-free after prepareToPlay
+    // has pre-allocated capacity for order=2 (8-element internal array).
 
     // ── Low Shelf ──────────────────────────────────────────────────────────────
     {
@@ -239,8 +245,9 @@ void PluginProcessor::updateFilters (const FilterParams& p)
         const float a1 = -2.0f * (A - 1.0f + (A + 1.0f) * cosW);
         const float a2 = A + 1.0f + (A - 1.0f) * cosW - beta;
 
-        writeCoeffsInPlace (*leftChain.get<LowShelf>().coefficients,  b0, b1, b2, a0, a1, a2);
-        writeCoeffsInPlace (*rightChain.get<LowShelf>().coefficients, b0, b1, b2, a0, a1, a2);
+        const std::array<float, 6> c {{ b0, b1, b2, a0, a1, a2 }};
+        *leftChain.get<LowShelf>().coefficients  = c;
+        *rightChain.get<LowShelf>().coefficients = c;
     }
 
     // ── Mid Peak/Bell ──────────────────────────────────────────────────────────
@@ -258,8 +265,9 @@ void PluginProcessor::updateFilters (const FilterParams& p)
         const float a1 = -2.0f * cosW;
         const float a2 = 1.0f - alpha / A;
 
-        writeCoeffsInPlace (*leftChain.get<PeakBell>().coefficients,  b0, b1, b2, a0, a1, a2);
-        writeCoeffsInPlace (*rightChain.get<PeakBell>().coefficients, b0, b1, b2, a0, a1, a2);
+        const std::array<float, 6> c {{ b0, b1, b2, a0, a1, a2 }};
+        *leftChain.get<PeakBell>().coefficients  = c;
+        *rightChain.get<PeakBell>().coefficients = c;
     }
 
     // ── High Shelf ─────────────────────────────────────────────────────────────
@@ -277,8 +285,9 @@ void PluginProcessor::updateFilters (const FilterParams& p)
         const float a1 = 2.0f * (A - 1.0f - (A + 1.0f) * cosW);
         const float a2 = A + 1.0f - (A - 1.0f) * cosW - beta;
 
-        writeCoeffsInPlace (*leftChain.get<HighShelf>().coefficients,  b0, b1, b2, a0, a1, a2);
-        writeCoeffsInPlace (*rightChain.get<HighShelf>().coefficients, b0, b1, b2, a0, a1, a2);
+        const std::array<float, 6> c {{ b0, b1, b2, a0, a1, a2 }};
+        *leftChain.get<HighShelf>().coefficients  = c;
+        *rightChain.get<HighShelf>().coefficients = c;
     }
 
     lastParams = p;

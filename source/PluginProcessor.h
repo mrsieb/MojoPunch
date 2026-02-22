@@ -78,9 +78,6 @@ private:
 
     FilterParams readParams() const noexcept;
     void updateFilters (const FilterParams& p);
-    static void writeCoeffsInPlace (juce::dsp::IIR::Coefficients<float>&,
-                                    float b0, float b1, float b2,
-                                    float a0, float a1, float a2) noexcept;
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginProcessor)

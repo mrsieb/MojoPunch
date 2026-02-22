@@ -89,8 +89,15 @@ jobs:
       - name: Cache the build
         uses: mozilla-actions/sccache-action@v0.0.9
 
+      - name: Cache CPM packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cpm
+          key: cpm-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', '**/cmake/CPM.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
       - name: Configure
-        run: cmake -B ${{ env.BUILD_DIR }} -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE}} -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.extra-flags }} .
+        run: cmake -B ${{ env.BUILD_DIR }} -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE}} -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCPM_SOURCE_CACHE=~/.cpm ${{ matrix.extra-flags }} .
 
       - name: Build
         run: cmake --build ${{ env.BUILD_DIR }} --config ${{ env.BUILD_TYPE }}
