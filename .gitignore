@@ -34,3 +34,4 @@ build/
 
 # MinGW toolchain (not needed for GitHub Actions)
 toolchain-mingw64.cmake
+.aider*

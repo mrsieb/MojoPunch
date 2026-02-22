@@ -1,23 +1,91 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+using namespace juce;
+
+//==============================================================================
+juce::AudioProcessorValueTreeState::ParameterLayout PluginProcessor::createParameterLayout()
+{
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "masterGain", "Master Gain",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f),
+        0.5f));
+
+    // Low Shelf
+    {
+        juce::NormalisableRange<float> freqRange (20.0f, 800.0f, 0.1f);
+        freqRange.setSkewForCentre (200.0f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> ("lowFreq", "Low Freq", freqRange, 200.0f));
+    }
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "lowGain", "Low Gain",
+        juce::NormalisableRange<float> (-12.0f, 12.0f, 0.1f),
+        0.0f));
+    {
+        juce::NormalisableRange<float> qRange (0.1f, 10.0f, 0.01f);
+        qRange.setSkewForCentre (1.0f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> ("lowQ", "Low Q", qRange, 0.707f));
+    }
+
+    // Mid Peak/Bell
+    {
+        juce::NormalisableRange<float> freqRange (200.0f, 8000.0f, 0.1f);
+        freqRange.setSkewForCentre (1000.0f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> ("midFreq", "Mid Freq", freqRange, 1000.0f));
+    }
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "midGain", "Mid Gain",
+        juce::NormalisableRange<float> (-12.0f, 12.0f, 0.1f),
+        0.0f));
+    {
+        juce::NormalisableRange<float> qRange (0.1f, 10.0f, 0.01f);
+        qRange.setSkewForCentre (1.0f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> ("midQ", "Mid Q", qRange, 1.0f));
+    }
+
+    // High Shelf
+    {
+        juce::NormalisableRange<float> freqRange (1000.0f, 20000.0f, 0.1f);
+        freqRange.setSkewForCentre (8000.0f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> ("highFreq", "High Freq", freqRange, 8000.0f));
+    }
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "highGain", "High Gain",
+        juce::NormalisableRange<float> (-12.0f, 12.0f, 0.1f),
+        0.0f));
+    {
+        juce::NormalisableRange<float> qRange (0.1f, 10.0f, 0.01f);
+        qRange.setSkewForCentre (1.0f);
+        params.push_back (std::make_unique<juce::AudioParameterFloat> ("highQ", "High Q", qRange, 0.707f));
+    }
+
+    return { params.begin(), params.end() };
+}
+
 //==============================================================================
 PluginProcessor::PluginProcessor()
-     : AudioProcessor (BusesProperties()
-                     #if ! JucePlugin_IsMidiEffect
-                      #if ! JucePlugin_IsSynth
-                       .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                      #endif
-                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
+    : AudioProcessor (BusesProperties()
+                    #if ! JucePlugin_IsMidiEffect
+                     #if ! JucePlugin_IsSynth
+                      .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                      #endif
-                       )
+                      .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
+                    #endif
+                      ),
+      apvts (*this, nullptr, "PARAMETERS", createParameterLayout())
 {
-    addParameter (gainParameter = new juce::AudioParameterFloat (
-        "gain",           // parameter ID
-        "Gain",           // parameter name
-        0.0f,             // minimum value
-        1.0f,             // maximum value
-        0.5f));           // default value
+    rawLowFreq    = apvts.getRawParameterValue ("lowFreq");
+    rawLowGain    = apvts.getRawParameterValue ("lowGain");
+    rawLowQ       = apvts.getRawParameterValue ("lowQ");
+    rawMidFreq    = apvts.getRawParameterValue ("midFreq");
+    rawMidGain    = apvts.getRawParameterValue ("midGain");
+    rawMidQ       = apvts.getRawParameterValue ("midQ");
+    rawHighFreq   = apvts.getRawParameterValue ("highFreq");
+    rawHighGain   = apvts.getRawParameterValue ("highGain");
+    rawHighQ      = apvts.getRawParameterValue ("highQ");
+    rawMasterGain = apvts.getRawParameterValue ("masterGain");
 }
 
 PluginProcessor::~PluginProcessor()
@@ -64,8 +132,7 @@ double PluginProcessor::getTailLengthSeconds() const
 
 int PluginProcessor::getNumPrograms()
 {
-    return 1;   // NB: some hosts don't cope very well if you tell them there are 0 programs,
-                // so this should be at least 1, even if you're not really implementing programs.
+    return 1;
 }
 
 int PluginProcessor::getCurrentProgram()
@@ -92,15 +159,25 @@ void PluginProcessor::changeProgramName (int index, const juce::String& newName)
 //==============================================================================
 void PluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
-    juce::ignoreUnused (sampleRate, samplesPerBlock);
+    currentSampleRate = sampleRate;
+
+    juce::dsp::ProcessSpec spec;
+    spec.sampleRate       = sampleRate;
+    spec.maximumBlockSize = static_cast<juce::uint32> (samplesPerBlock);
+    spec.numChannels      = 1;
+
+    leftChain.prepare (spec);
+    rightChain.prepare (spec);
+
+    smoothedGain.reset (sampleRate, 0.05);
+    smoothedGain.setCurrentAndTargetValue (rawMasterGain->load());
+
+    lastParams = {};            // force coefficient update on first processBlock
+    updateFilters (readParams());
 }
 
 void PluginProcessor::releaseResources()
 {
-    // When playback stops, you can use this as an opportunity to free up any
-    // spare memory, etc.
 }
 
 bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -109,13 +186,10 @@ bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
     juce::ignoreUnused (layouts);
     return true;
   #else
-    // This is the place where you check if the layout is supported.
-    // In this template code we only support mono or stereo.
     if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
      && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
         return false;
 
-    // This checks if the input layout matches the output layout
    #if ! JucePlugin_IsSynth
     if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
         return false;
@@ -125,8 +199,93 @@ bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
   #endif
 }
 
+PluginProcessor::FilterParams PluginProcessor::readParams() const noexcept
+{
+    return { rawLowFreq->load(),  rawLowGain->load(),  rawLowQ->load(),
+             rawMidFreq->load(),  rawMidGain->load(),  rawMidQ->load(),
+             rawHighFreq->load(), rawHighGain->load(), rawHighQ->load() };
+}
+
+void PluginProcessor::writeCoeffsInPlace (juce::dsp::IIR::Coefficients<float>& c,
+                                           float b0, float b1, float b2,
+                                           float a0, float a1, float a2) noexcept
+{
+    const float inv = 1.0f / a0;
+    auto* raw = c.coefficients.getRawDataPointer();
+    raw[0] = b0 * inv;
+    raw[1] = b1 * inv;
+    raw[2] = b2 * inv;
+    raw[3] = a1 * inv;
+    raw[4] = a2 * inv;
+}
+
+void PluginProcessor::updateFilters (const FilterParams& p)
+{
+    using namespace juce;
+    const float sr = static_cast<float> (currentSampleRate);
+
+    // ── Low Shelf ──────────────────────────────────────────────────────────────
+    {
+        const float A     = std::sqrt (Decibels::decibelsToGain (p.lowGain));
+        const float omega = MathConstants<float>::twoPi * p.lowFreq / sr;
+        const float cosW  = std::cos (omega);
+        const float sinW  = std::sin (omega);
+        const float beta  = sinW * std::sqrt (A) / p.lowQ;
+
+        const float b0 = A * (A + 1.0f - (A - 1.0f) * cosW + beta);
+        const float b1 = 2.0f * A * (A - 1.0f - (A + 1.0f) * cosW);
+        const float b2 = A * (A + 1.0f - (A - 1.0f) * cosW - beta);
+        const float a0 = A + 1.0f + (A - 1.0f) * cosW + beta;
+        const float a1 = -2.0f * (A - 1.0f + (A + 1.0f) * cosW);
+        const float a2 = A + 1.0f + (A - 1.0f) * cosW - beta;
+
+        writeCoeffsInPlace (*leftChain.get<LowShelf>().coefficients,  b0, b1, b2, a0, a1, a2);
+        writeCoeffsInPlace (*rightChain.get<LowShelf>().coefficients, b0, b1, b2, a0, a1, a2);
+    }
+
+    // ── Mid Peak/Bell ──────────────────────────────────────────────────────────
+    {
+        const float A     = std::sqrt (Decibels::decibelsToGain (p.midGain));
+        const float omega = MathConstants<float>::twoPi * p.midFreq / sr;
+        const float cosW  = std::cos (omega);
+        const float sinW  = std::sin (omega);
+        const float alpha = sinW / (2.0f * p.midQ);
+
+        const float b0 = 1.0f + alpha * A;
+        const float b1 = -2.0f * cosW;
+        const float b2 = 1.0f - alpha * A;
+        const float a0 = 1.0f + alpha / A;
+        const float a1 = -2.0f * cosW;
+        const float a2 = 1.0f - alpha / A;
+
+        writeCoeffsInPlace (*leftChain.get<PeakBell>().coefficients,  b0, b1, b2, a0, a1, a2);
+        writeCoeffsInPlace (*rightChain.get<PeakBell>().coefficients, b0, b1, b2, a0, a1, a2);
+    }
+
+    // ── High Shelf ─────────────────────────────────────────────────────────────
+    {
+        const float A     = std::sqrt (Decibels::decibelsToGain (p.highGain));
+        const float omega = MathConstants<float>::twoPi * p.highFreq / sr;
+        const float cosW  = std::cos (omega);
+        const float sinW  = std::sin (omega);
+        const float beta  = sinW * std::sqrt (A) / p.highQ;
+
+        const float b0 = A * (A + 1.0f + (A - 1.0f) * cosW + beta);
+        const float b1 = -2.0f * A * (A - 1.0f + (A + 1.0f) * cosW);
+        const float b2 = A * (A + 1.0f + (A - 1.0f) * cosW - beta);
+        const float a0 = A + 1.0f - (A - 1.0f) * cosW + beta;
+        const float a1 = 2.0f * (A - 1.0f - (A + 1.0f) * cosW);
+        const float a2 = A + 1.0f - (A - 1.0f) * cosW - beta;
+
+        writeCoeffsInPlace (*leftChain.get<HighShelf>().coefficients,  b0, b1, b2, a0, a1, a2);
+        writeCoeffsInPlace (*rightChain.get<HighShelf>().coefficients, b0, b1, b2, a0, a1, a2);
+    }
+
+    lastParams = p;
+}
+
 void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
-                                              juce::MidiBuffer& midiMessages)
+                                    juce::MidiBuffer& midiMessages)
 {
     juce::ignoreUnused (midiMessages);
 
@@ -134,33 +293,40 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     auto totalNumInputChannels  = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();
 
-    // In case we have more outputs than inputs, this code clears any output
-    // channels that didn't contain input data, (because these aren't
-    // guaranteed to be empty - they may contain garbage).
-    // This is here to avoid people getting screaming feedback
-    // when they first compile a plugin, but obviously you don't need to keep
-    // this code if your algorithm always overwrites all the output channels.
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
-    // Apply gain to all channels
-    float gain = gainParameter->get();
+    // Only recalculate biquad coefficients when a parameter has changed.
+    const auto p = readParams();
+    if (p != lastParams)
+        updateFilters (p);
 
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    juce::dsp::AudioBlock<float> block (buffer);
+
+    auto leftBlock = block.getSingleChannelBlock (0);
+    leftChain.process (juce::dsp::ProcessContextReplacing<float> (leftBlock));
+
+    if (totalNumInputChannels > 1)
     {
-        auto* channelData = buffer.getWritePointer (channel);
+        auto rightBlock = block.getSingleChannelBlock (1);
+        rightChain.process (juce::dsp::ProcessContextReplacing<float> (rightBlock));
+    }
 
-        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
-        {
-            channelData[sample] *= gain;
-        }
+    // Apply master gain with per-sample smoothing to avoid clicks.
+    smoothedGain.setTargetValue (rawMasterGain->load());
+    const int numSamples = buffer.getNumSamples();
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float gain = smoothedGain.getNextValue();
+        for (int ch = 0; ch < totalNumInputChannels; ++ch)
+            buffer.getWritePointer (ch)[i] *= gain;
     }
 }
 
 //==============================================================================
 bool PluginProcessor::hasEditor() const
 {
-    return true; // (change this to false if you choose to not supply an editor)
+    return true;
 }
 
 juce::AudioProcessorEditor* PluginProcessor::createEditor()
@@ -171,18 +337,19 @@ juce::AudioProcessorEditor* PluginProcessor::createEditor()
 //==============================================================================
 void PluginProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    juce::MemoryOutputStream stream (destData, true);
-    stream.writeFloat (*gainParameter);
+    auto state = apvts.copyState();
+    std::unique_ptr<juce::XmlElement> xml (state.createXml());
+    copyXmlToBinary (*xml, destData);
 }
 
 void PluginProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    juce::MemoryInputStream stream (data, static_cast<size_t> (sizeInBytes), false);
-    gainParameter->setValueNotifyingHost (stream.readFloat());
+    std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, sizeInBytes));
+    if (xml != nullptr && xml->hasTagName (apvts.state.getType()))
+        apvts.replaceState (juce::ValueTree::fromXml (*xml));
 }
 
 //==============================================================================
-// This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new PluginProcessor();

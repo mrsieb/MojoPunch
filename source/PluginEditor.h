@@ -16,14 +16,30 @@ public:
     void resized() override;
 
 private:
-    // This reference is provided as a quick way for your editor to
-    // access the processor object that created it.
+    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+
     PluginProcessor& processorRef;
     std::unique_ptr<melatonin::Inspector> inspector;
     juce::TextButton inspectButton { "Inspect the UI" };
 
-    juce::Slider gainSlider;
-    juce::Label gainLabel;
+    // Sliders — declared before attachments (attachments must be destroyed first)
+    juce::Slider lowFreqSlider,  lowGainSlider,  lowQSlider;
+    juce::Slider midFreqSlider,  midGainSlider,  midQSlider;
+    juce::Slider highFreqSlider, highGainSlider, highQSlider;
+    juce::Slider masterGainSlider;
+
+    juce::Label lowFreqLabel,  lowGainLabel,  lowQLabel;
+    juce::Label midFreqLabel,  midGainLabel,  midQLabel;
+    juce::Label highFreqLabel, highGainLabel, highQLabel;
+    juce::Label masterGainLabel;
+
+    // Attachments — declared after sliders, destroyed before sliders
+    std::unique_ptr<SliderAttachment> lowFreqAttach,  lowGainAttach,  lowQAttach;
+    std::unique_ptr<SliderAttachment> midFreqAttach,  midGainAttach,  midQAttach;
+    std::unique_ptr<SliderAttachment> highFreqAttach, highGainAttach, highQAttach;
+    std::unique_ptr<SliderAttachment> masterGainAttach;
+
+    void configureRotary (juce::Slider&, juce::Label&, const juce::String&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginEditor)
 };
